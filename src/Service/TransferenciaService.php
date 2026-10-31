@@ -92,6 +92,10 @@ final class TransferenciaService
 
     private function debitarECreditar(array $dados): void
     {
+        // Concorrência (desativada): descomente esta linha e ContaRepository::bloquearParaAtualizacao.
+        // Sem o bloqueio, duas transferências simultâneas podem ler o mesmo saldo e as duas debitarem.
+        // $this->contaRepository->bloquearParaAtualizacao($dados['origem']);
+
         $saldoCentavos = $this->contaRepository->buscarPorId($dados['origem'])['saldoCentavos'];
 
         if ($saldoCentavos < $dados['valorCentavos']) {

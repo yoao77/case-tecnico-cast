@@ -30,6 +30,16 @@ final class ContaRepository
         $this->somarAoSaldo($id, $valorCentavos);
     }
 
+    // Concorrência (desativada): usado pelo trecho comentado em TransferenciaService::debitarECreditar.
+    // O SQLite não tem SELECT ... FOR UPDATE: uma escrita logo no início da transação pega o bloqueio
+    // de escrita do banco, e a transferência concorrente espera esta terminar antes de ler o saldo.
+    // public function bloquearParaAtualizacao(int $id): void
+    // {
+    //     $this->pdo
+    //         ->prepare('UPDATE contas SET atualizado_em = atualizado_em WHERE id = :id')
+    //         ->execute(['id' => $id]);
+    // }
+
     private function somarAoSaldo(int $id, int $valorCentavos): void
     {
         $this->pdo
