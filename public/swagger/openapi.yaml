@@ -1,0 +1,197 @@
+openapi: 3.0.3
+
+info:
+  title: API de Transferências
+  version: 1.0.0
+  description: |
+    Transferências entre duas contas fictícias. Todos os valores são inteiros em centavos (3000 = R$ 30,00).
+
+    Contas criadas a cada execução limpa:
+    - **Conta A** = id `1`, com 100000 centavos
+    - **Conta B** = id `2`, com 50000 centavos
+
+tags:
+  - name: Transferências
+  - name: Contas
+
+paths:
+  /transferencias:
+    post:
+      tags: [Transferências]
+      summary: Transfere um valor entre duas contas
+      description: |
+        Debita a origem, credita o destino e registra a movimentação de uma vez só.
+        Se algo falhar, nenhum saldo muda e nenhuma movimentação é criada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NovaTransferencia'
+            example:
+              origem: 1
+              destino: 2
+              valorCentavos: 3000
+      responses:
+        '201':
+          description: Transferência concluída.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transferencia'
+              example:
+                id: 1
+                origem: 1
+                destino: 2
+                valorCentavos: 3000
+                status: CONCLUIDA
+        '400':
+          description: Entrada inválida (valor zero, negativo, fracionário, campo ausente ou origem igual ao destino).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Erro'
+              examples:
+                valorZero:
+                  summary: Valor zero ou negativo
+                  value:
+                    erro: O campo valorCentavos deve ser maior que zero.
+                valorFracionario:
+                  summary: Valor fracionário
+                  value:
+                    erro: O campo valorCentavos deve ser um número inteiro.
+                campoAusente:
+                  summary: Campo ausente
+                  value:
+                    erro: O campo destino é obrigatório.
+                mesmaConta:
+                  summary: Origem igual ao destino
+                  value:
+                    erro: A conta de origem deve ser diferente da conta de destino.
+        '404':
+          $ref: '#/components/responses/ContaNaoEncontrada'
+        '409':
+          description: Saldo insuficiente na conta de origem.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Erro'
+              example:
+                erro: Saldo insuficiente para realizar a transferência.
+
+  /contas/{id}:
+    get:
+      tags: [Contas]
+      summary: Consulta o saldo atual da conta
+      parameters:
+        - $ref: '#/components/parameters/ContaId'
+      responses:
+        '200':
+          description: Conta encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conta'
+              example:
+                id: 1
+                saldoCentavos: 97000
+        '404':
+          $ref: '#/components/responses/ContaNaoEncontrada'
+
+  /contas/{id}/movimentacoes:
+    get:
+      tags: [Contas]
+      summary: Lista as transferências da conta em ordem de ID
+      description: Inclui as transferências em que a conta foi origem ou destino.
+      parameters:
+        - $ref: '#/components/parameters/ContaId'
+      responses:
+        '200':
+          description: Movimentações da conta.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transferencia'
+              example:
+                - id: 1
+                  origem: 1
+                  destino: 2
+                  valorCentavos: 3000
+                  status: CONCLUIDA
+        '404':
+          $ref: '#/components/responses/ContaNaoEncontrada'
+
+components:
+  parameters:
+    ContaId:
+      name: id
+      in: path
+      required: true
+      description: Id da conta (1 = conta A, 2 = conta B).
+      schema:
+        type: integer
+        example: 1
+
+  schemas:
+    NovaTransferencia:
+      type: object
+      required: [origem, destino, valorCentavos]
+      properties:
+        origem:
+          type: integer
+          example: 1
+        destino:
+          type: integer
+          example: 2
+        valorCentavos:
+          type: integer
+          minimum: 1
+          example: 3000
+
+    Transferencia:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        origem:
+          type: integer
+          example: 1
+        destino:
+          type: integer
+          example: 2
+        valorCentavos:
+          type: integer
+          example: 3000
+        status:
+          type: string
+          enum: [PENDENTE, PROCESSANDO, CONCLUIDA, FALHOU]
+          example: CONCLUIDA
+
+    Conta:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        saldoCentavos:
+          type: integer
+          example: 100000
+
+    Erro:
+      type: object
+      properties:
+        erro:
+          type: string
+
+  responses:
+    ContaNaoEncontrada:
+      description: Conta inexistente.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Erro'
+          example:
+            erro: Conta 99 não encontrada.
