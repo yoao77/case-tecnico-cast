@@ -26,6 +26,22 @@ final class TransferenciaService
 
     public function transferir(int $origem, int $destino, int $valorCentavos, ?string $idempotencia = null): array
     {
+        // Idempotência (desativada): descomente este bloco, TransferenciaRepository::buscarPorIdempotencia
+        // e o repasse do cabeçalho Idempotency-Key no TransferenciaController.
+        // A chave repetida devolve o resultado da primeira requisição sem debitar e creditar de novo:
+        // a transferência original ou, se ela falhou, o mesmo 409.
+        // $original = $idempotencia !== null
+        //     ? $this->transferenciaRepository->buscarPorIdempotencia($idempotencia)
+        //     : null;
+        //
+        // if ($original !== null && $original['status'] === StatusTransferencia::Falhou->value) {
+        //     throw new SaldoInsuficienteException();
+        // }
+        //
+        // if ($original !== null) {
+        //     return $original;
+        // }
+
         $this->contaService->buscar($origem);
         $this->contaService->buscar($destino);
 

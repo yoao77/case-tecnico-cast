@@ -29,6 +29,8 @@ final class TransferenciaController
             $dados['origem'],
             $dados['destino'],
             $dados['valorCentavos'],
+            // Idempotência (desativada): descomente para repassar a chave enviada pelo cliente.
+            // $request->getHeaderLine('Idempotency-Key') ?: null,
         );
 
         return $this->json($response, $transferencia, 201);

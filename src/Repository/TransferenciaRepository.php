@@ -9,6 +9,7 @@ use PDO;
 
 final class TransferenciaRepository
 {
+    // LEFT JOIN porque a transferência que falhou não tem movimentação registrada.
     private const string CONSULTA_TRANSFERENCIA =
         'SELECT t.id,
                 tc.conta_origem_id AS origem,
@@ -16,7 +17,7 @@ final class TransferenciaRepository
                 tc.valor_centavos AS valorCentavos,
                 t.status
            FROM transferencia t
-           JOIN transferencias_contas tc ON tc.transferencia_id = t.id';
+           LEFT JOIN transferencias_contas tc ON tc.transferencia_id = t.id';
 
     public function __construct(private readonly PDO $pdo)
     {
@@ -70,4 +71,13 @@ final class TransferenciaRepository
 
         return $consulta->fetchAll();
     }
+
+    // Idempotência (desativada): usado pelo bloco comentado em TransferenciaService::transferir.
+    // public function buscarPorIdempotencia(string $idempotencia): ?array
+    // {
+    //     $consulta = $this->pdo->prepare(self::CONSULTA_TRANSFERENCIA . ' WHERE t.idempotencia = :idempotencia');
+    //     $consulta->execute(['idempotencia' => $idempotencia]);
+    //
+    //     return $consulta->fetch() ?: null;
+    // }
 }
