@@ -1,0 +1,8 @@
+/vendor/
+/var/banco/*
+/var/logs/*
+!/var/banco/.gitkeep
+!/var/logs/.gitkeep
+.phpunit.cache/
+.phpunit.result.cache
+.DS_Store

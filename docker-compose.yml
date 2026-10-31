@@ -1,0 +1,10 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    tmpfs:
+      - /app/var/banco
+    command: sh -c "composer install && php bin/criar-banco.php && php -S 0.0.0.0:8000 -t public"
