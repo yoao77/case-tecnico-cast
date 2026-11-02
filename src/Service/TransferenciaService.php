@@ -111,11 +111,11 @@ final class TransferenciaService
 
     private function debitarECreditar(array $dados): void
     {
-        // Concorrência (desativada): descomente esta linha e ContaRepository::bloquearParaAtualizacao.
-        // Sem o bloqueio, duas transferências simultâneas podem ler o mesmo saldo e as duas debitarem.
-        // $this->contaRepository->bloquearParaAtualizacao($dados['origem']);
-
+        // Concorrência (conceitual): sem trava, duas transferências simultâneas da mesma conta podem ler o mesmo
+        // saldo e as duas debitarem. Num banco com trava por linha (PostgreSQL, MySQL), a leitura comentada abaixo,
+        // com SELECT ... FOR UPDATE, trava a conta de origem até o COMMIT e resolve isso. O SQLite não tem FOR UPDATE.
         $saldoCentavos = $this->contaRepository->buscarPorId($dados['origem'])['saldoCentavos'];
+        // $saldoCentavos = $this->contaRepository->buscarPorIdParaAtualizacao($dados['origem'])['saldoCentavos'];
 
         if ($saldoCentavos < $dados['valorCentavos']) {
             throw new SaldoInsuficienteException();
