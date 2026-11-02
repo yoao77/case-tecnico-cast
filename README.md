@@ -370,6 +370,17 @@ sequenceDiagram
 
 A API da questão 1 já traz essas duas proteções prontas para ligar: veja [Idempotência e concorrência](#idempotência-e-concorrência-desativadas).
 
+## Referências e ferramentas
+
+- **Linguagem e framework:** PHP 8.4 e Slim 4 (`slim/slim` e `slim/psr7`).
+- **Bibliotecas:** PHP-DI (container com autowiring), Monolog (log de requisições), ramsey/uuid (identificador de cada processamento) e Pest (testes).
+- **Banco:** SQLite, acessado com PDO.
+- **Ambiente:** Docker (imagem `php:8.4-cli-alpine`), Docker Compose e Composer.
+- **Documentação da API:** especificação OpenAPI escrita à mão e Swagger UI, carregado do unpkg.
+- **Diagramas:** Mermaid, na questão 2 e em `docs/migrations`.
+- **Referências:** a fila segue as tabelas `jobs` e `failed_jobs`, o `retry_after` e o `queue:work` das [filas do Laravel](https://laravel.com/docs/queues). Documentação do [Slim 4](https://www.slimframework.com/docs/v4/), do [PHP-DI](https://php-di.org/doc/), do [Pest](https://pestphp.com/docs), do [PDO](https://www.php.net/manual/pt_BR/book.pdo.php) e das [transações no SQLite](https://www.sqlite.org/lang_transaction.html).
+- **Assistente de IA:** Claude Code, no apoio ao código, aos testes e à revisão do README.
+
 ## Estrutura do projeto
 
 ```
