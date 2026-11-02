@@ -92,7 +92,7 @@ docker compose exec api vendor/bin/pest
 
 São 18 casos de teste: sucesso, saldo insuficiente, nove variações de entrada inválida, conta inexistente, ordem do histórico e o comportamento da fila. Todos conferem os saldos e as movimentações depois da operação, não só o código HTTP. O detalhe de cada cenário está em [`docs/testes`](docs/testes/README.md).
 
-O mesmo comando também roda os 4 testes da [questão 2](#testes-da-questão-2), que ficam em `tests/Questao2`.
+O mesmo comando também roda os 5 testes da [questão 2](#testes-da-questão-2), que ficam em `tests/Questao2`.
 
 ## Como a transferência é processada
 
@@ -212,7 +212,10 @@ Como não há transação, nada desfaz o débito quando `creditar` lança a exce
 
 ### A correção
 
-A correção mínima é conferir o bloqueio do destino junto com as outras validações, **antes** de mexer em qualquer saldo. Assim, tudo o que pode falhar acontece antes da primeira alteração:
+A correção tem duas partes, que se completam:
+
+1. **Validar o destino antes de mexer em qualquer saldo.** O bloqueio passa a ser conferido junto com as outras validações. É o que resolve o cenário do case: a transferência para B bloqueada para antes da primeira alteração.
+2. **Transação em memória com rollback.** Débito, crédito e registro rodam juntos num `try/catch`. Os saldos são guardados antes e, se qualquer passo falhar, eles voltam ao que eram. A validação cuida da falha conhecida; a transação garante o tudo-ou-nada também para as falhas que ninguém previu.
 
 ```diff
   if ($origem->saldoCentavos < $valorCentavos) {
@@ -223,18 +226,28 @@ A correção mínima é conferir o bloqueio do destino junto com as outras valid
 +     throw new ContaBloqueadaException($destino->id);
 + }
 +
-  $origem->debitar($valorCentavos);
-  $destino->creditar($valorCentavos);
-  $this->movimentacaoRepository->registrar($origem->id, $destino->id, $valorCentavos);
++ $saldoOrigem = $origem->saldoCentavos;
++ $saldoDestino = $destino->saldoCentavos;
++
++ try {
+      $origem->debitar($valorCentavos);
+      $destino->creditar($valorCentavos);
+      $this->movimentacaoRepository->registrar($origem->id, $destino->id, $valorCentavos);
++ } catch (Throwable $erro) {
++     $origem->restaurarSaldo($saldoOrigem);
++     $destino->restaurarSaldo($saldoDestino);
++
++     throw $erro;
++ }
 ```
 
-O erro não é engolido: o serviço continua lançando `ContaBloqueadaException`, só que agora antes de qualquer alteração. O `Conta::creditar` mantém a própria verificação, então a entidade continua recusando crédito em conta bloqueada, venha a chamada de onde vier.
+O erro não é engolido em nenhuma das partes: a validação lança `ContaBloqueadaException` e o rollback relança o erro original depois de restaurar os saldos. A diferença é que nenhuma alteração fica para trás. O `Conta::creditar` mantém a própria verificação, então a entidade continua recusando crédito em conta bloqueada, venha a chamada de onde vier.
 
 | Arquivo em `src/Questao2` | O que é |
 | ------------------------- | ------- |
-| `Entity/Conta.php` | A conta em memória: `id`, `saldoCentavos` e a nova flag `bloqueada`. |
+| `Entity/Conta.php` | A conta em memória: `id`, `saldoCentavos` e a nova flag `bloqueada`. O `restaurarSaldo` é usado pelo rollback. |
 | `Service/TransferenciaOriginalService.php` | O pseudocódigo do case traduzido como veio, **com a falha**. Fica no projeto só para o teste reproduzir o problema. |
-| `Service/TransferenciaService.php` | A versão corrigida. |
+| `Service/TransferenciaService.php` | A versão corrigida: validação do destino e transação com rollback. |
 | `Repository/MovimentacaoRepository.php` | Guarda as movimentações num array. |
 | `Exceptions/ContaBloqueadaException.php` | O erro de conta bloqueada. |
 
@@ -246,12 +259,13 @@ As validações de valor e de saldo reaproveitam as exceções da questão 1 (`D
 docker compose exec api vendor/bin/pest tests/Questao2
 ```
 
-Todos começam com A = 10000 e B = 5000 e transferem de A para B. Os dois primeiros são o mesmo cenário rodando nos dois serviços, o que mostra a falha e a correção lado a lado:
+Todos transferem de A (10000) para B (5000, salvo onde indicado). Os dois primeiros são o mesmo cenário rodando nos dois serviços, o que mostra a falha e a correção lado a lado:
 
 | Cenário | Serviço | Resultado |
 | ------- | ------- | --------- |
 | Falha original: B bloqueada, 3000 | original | Erro, com A = 7000, B = 5000 e nenhuma movimentação. É a falha reproduzida. |
 | Correção: B bloqueada, 3000 | corrigido | Erro, com A = 10000, B = 5000 e nenhuma movimentação. |
+| Rollback: B com saldo no limite do inteiro (`PHP_INT_MAX`), 3000 | corrigido | O crédito estoura e o PHP lança `TypeError`, uma falha que a validação não prevê. A transação devolve o débito: A = 10000, B sem alteração e nenhuma movimentação. Sem o rollback, A terminaria com 7000. |
 | Sucesso: B desbloqueada, 3000 | corrigido | A = 7000, B = 8000 e uma movimentação registrada. |
 | Saldo insuficiente: 10001 | corrigido | Erro, com A = 10000, B = 5000 e nenhuma movimentação. |
 

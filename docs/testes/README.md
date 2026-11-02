@@ -30,7 +30,7 @@ Os helpers ficam em `tests/Pest.php`. O principal é o `verificarQueNadaMudou()`
 ### Questão 2 (`tests/Questao2`)
 
 - São testes de unidade, sem Slim e sem banco: o módulo da questão 2 trabalha só em memória.
-- Cada teste cria as contas do zero (A com 10000 e B com 5000 centavos) e um `MovimentacaoRepository` vazio.
+- Cada teste cria as contas do zero (A com 10000 e, salvo no teste do rollback, B com 5000 centavos) e um `MovimentacaoRepository` vazio.
 - Depois de cada transferência, os testes conferem o saldo das duas contas e a lista de movimentações, além da exceção lançada.
 
 ## Cenários
@@ -69,6 +69,7 @@ Os dois primeiros cenários são o mesmo (B bloqueada, 3000 de A para B), rodand
 | ------- | -------------- |
 | Falha original | No `TransferenciaOriginalService`, lança `ContaBloqueadaException` e termina com A = 7000, B = 5000 e nenhuma movimentação: o dinheiro some. |
 | Correção | No `TransferenciaService`, lança a mesma exceção, mas A continua 10000, B continua 5000 e não há movimentação. |
+| Rollback | Com B no limite do inteiro (`PHP_INT_MAX`), o crédito estoura com `TypeError` depois do débito, uma falha que a validação não prevê. A transação restaura os saldos (A = 10000, B sem alteração), não registra movimentação e relança o erro. Sem o rollback, A terminaria com 7000. |
 | Sucesso com B desbloqueada | Saldos ficam A = 7000 e B = 8000, e a movimentação de 3000 de A para B é registrada. |
 | Saldo insuficiente | 10001 saindo da conta A lança `SaldoInsuficienteException`; saldos e movimentações não mudam. |
 
@@ -84,4 +85,4 @@ Os dois primeiros cenários são o mesmo (B bloqueada, 3000 de A para B), rodand
 | Questão 2: sucesso com B desbloqueada | Sucesso com B desbloqueada |
 | Questão 2: saldo insuficiente | Saldo insuficiente (`Questao2/TransferenciaTest`) |
 
-No total são 22 casos de teste: 18 da API (contando cada variação de entrada inválida) e 4 da questão 2.
+No total são 23 casos de teste: 18 da API (contando cada variação de entrada inválida) e 5 da questão 2.
