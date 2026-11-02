@@ -157,7 +157,7 @@ A limitação é essa:
 
 ## Idempotência e concorrência (desativadas)
 
-O case não exige essas duas partes, então elas estão no código **comentadas**, prontas para ligar. Basta descomentar os trechos marcados com `Idempotência (desativada)` ou `Concorrência (desativada)`.
+O case não exige essas duas partes, então elas estão no código **comentadas**. A idempotência está pronta para ligar: basta descomentar os trechos marcados com `Idempotência (desativada)`. A concorrência é conceitual (`Concorrência (conceitual)`), porque depende de um recurso que o SQLite não tem, como explicado abaixo.
 
 ### Idempotência
 
@@ -179,27 +179,28 @@ A coluna `transferencia.idempotencia` é `UNIQUE`. Se duas requisições com a m
 
 ### Concorrência
 
-Cobre duas transferências simultâneas saindo da mesma conta. Sem controle, as duas podem ler o mesmo saldo antes de qualquer uma debitar.
+Cobre duas transferências simultâneas saindo da mesma conta. Sem trava, as duas podem ler o mesmo saldo antes de qualquer uma debitar, e as duas acham que podem.
 
-O SQLite não tem `SELECT ... FOR UPDATE`. O equivalente aqui é fazer uma escrita na conta de origem logo no começo da transação, o que pega o bloqueio de escrita do banco. A segunda transferência espera a primeira terminar e só então lê o saldo, já atualizado.
+A solução clássica é ler o saldo com `SELECT ... FOR UPDATE`, dentro da transação:
 
-Para ligar, descomente dois trechos:
+```sql
+SELECT id, saldo_centavos FROM contas WHERE id = :id FOR UPDATE
+```
 
-1. `TransferenciaService::debitarECreditar`: a chamada `bloquearParaAtualizacao`.
-2. `ContaRepository::bloquearParaAtualizacao`: o método.
+O `FOR UPDATE` trava a linha daquela conta até o `COMMIT` ou `ROLLBACK`. Uma segunda transferência da mesma conta fica parada nessa consulta e, quando passa, lê o saldo já atualizado: uma conclui (201) e a outra recebe 409. Só a linha da conta fica travada, então transferências de contas diferentes não esperam umas pelas outras.
 
-Testei isso disparando duas transferências de 30000 ao mesmo tempo da conta B, que tem 50000:
+**O SQLite não tem `FOR UPDATE`** (a consulta dá erro de sintaxe), então essa parte fica comentada, só para mostrar o conceito. Num PostgreSQL ou MySQL, bastaria descomentar dois trechos:
 
-| | Resultado |
-| - | --------- |
-| Sem o bloqueio | As duas falham com 500 (`database is locked`): o SQLite percebe o impasse e derruba as duas. O saldo não fica errado, mas até a transferência que cabia no saldo é perdida. |
-| Com o bloqueio | Uma conclui (201) e a outra recebe 409. Saldo final: 20000. |
+1. `ContaRepository::buscarPorIdParaAtualizacao`: a consulta com `FOR UPDATE`.
+2. `TransferenciaService::debitarECreditar`: a linha que lê o saldo por ela, no lugar do `buscarPorId`.
+
+Mesmo sem a trava, o `CHECK (saldo_centavos >= 0)` da tabela é a última barreira: o banco recusa qualquer débito que deixaria o saldo negativo. Numa corrida, o saldo não fica errado, mas a transferência que perder recebe 500 em vez de 409.
 
 O servidor embutido do PHP atende uma requisição por vez, então no `docker compose up` normal essa corrida nem acontece. Para reproduzi-la, suba o servidor com `PHP_CLI_SERVER_WORKERS=4`.
 
 ## O que eu melhoraria para uso real
 
-- **Banco de verdade** (PostgreSQL ou MySQL), com `SELECT ... FOR UPDATE` no lugar do bloqueio do SQLite, índices em `conta_origem_id` e `conta_destino_id` e migrations versionadas (Phinx ou Doctrine Migrations).
+- **Banco de verdade** (PostgreSQL ou MySQL), com o `SELECT ... FOR UPDATE` ligado, índices em `conta_origem_id` e `conta_destino_id` e migrations versionadas (Phinx ou Doctrine Migrations).
 - **Fila assíncrona de verdade:** um worker separado (Redis, RabbitMQ ou SQS), o `POST` respondendo 202 com o ID e um `GET /transferencias/{id}` para o cliente acompanhar o status, com novas tentativas e espera crescente entre elas.
 - **Idempotência ligada e completa:** guardar a resposta original com prazo de validade e, quando duas requisições com a mesma chave chegarem juntas, devolver a transferência original à segunda em vez de erro.
 - **Livro-razão (dupla entrada):** um lançamento de débito e um de crédito por transferência, com o saldo calculado a partir deles. Fica fácil auditar e conciliar.
