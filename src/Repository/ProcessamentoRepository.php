@@ -9,6 +9,10 @@ use Throwable;
 
 final class ProcessamentoRepository
 {
+    // Como o retry_after do Laravel: uma reserva mais velha que isso é tratada como abandonada
+    // (o processo caiu no meio) e o processamento pode ser reservado de novo pelo worker.
+    private const int SEGUNDOS_PARA_RESERVA_VENCER = 30;
+
     public function __construct(private readonly PDO $pdo)
     {
     }
@@ -22,13 +26,46 @@ final class ProcessamentoRepository
         return (int) $this->pdo->lastInsertId();
     }
 
-    public function reservar(int $id): array
+    /**
+     * Processamentos que ficaram para trás: reservados há mais tempo que o limite, ou que nem chegaram
+     * a ser reservados e entraram na fila antes disso. Os recentes ainda estão com a requisição que os criou.
+     */
+    public function listarDisponiveis(): array
     {
-        $this->pdo
-            ->prepare('UPDATE processamentos SET reservado_em = :agora, tentativas = tentativas + 1 WHERE id = :id')
-            ->execute(['id' => $id, 'agora' => time()]);
+        $limite = time() - self::SEGUNDOS_PARA_RESERVA_VENCER;
 
-        $consulta = $this->pdo->prepare('SELECT id, dados FROM processamentos WHERE id = :id');
+        $consulta = $this->pdo->prepare(
+            'SELECT id
+               FROM processamentos
+              WHERE disponivel_em <= CURRENT_TIMESTAMP
+                AND (reservado_em <= :limiteReserva OR (reservado_em IS NULL AND criado_em <= :limiteCriacao))
+              ORDER BY id'
+        );
+        $consulta->execute(['limiteReserva' => $limite, 'limiteCriacao' => gmdate('Y-m-d H:i:s', $limite)]);
+
+        return $consulta->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    /**
+     * Reserva só se ninguém estiver com o processamento: livre ou com a reserva vencida. O UPDATE com a
+     * condição é atômico, então entre o worker e uma requisição (ou dois workers) só um consegue.
+     */
+    public function reservar(int $id): ?array
+    {
+        $agora = time();
+
+        $reserva = $this->pdo->prepare(
+            'UPDATE processamentos
+                SET reservado_em = :agora, tentativas = tentativas + 1
+              WHERE id = :id AND (reservado_em IS NULL OR reservado_em <= :limite)'
+        );
+        $reserva->execute(['id' => $id, 'agora' => $agora, 'limite' => $agora - self::SEGUNDOS_PARA_RESERVA_VENCER]);
+
+        if ($reserva->rowCount() === 0) {
+            return null;
+        }
+
+        $consulta = $this->pdo->prepare('SELECT id, dados, tentativas FROM processamentos WHERE id = :id');
         $consulta->execute(['id' => $id]);
 
         return $consulta->fetch();

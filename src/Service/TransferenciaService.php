@@ -11,10 +11,13 @@ use App\Repository\ProcessamentoRepository;
 use App\Repository\TransferenciaRepository;
 use PDO;
 use Ramsey\Uuid\Uuid;
+use RuntimeException;
 use Throwable;
 
 final class TransferenciaService
 {
+    private const int MAXIMO_TENTATIVAS = 3;
+
     public function __construct(
         private readonly PDO $pdo,
         private readonly ContaService $contaService,
@@ -60,14 +63,25 @@ final class TransferenciaService
     }
 
     /**
-     * Executa o processamento enfileirado dentro da própria requisição, como um worker faria.
+     * Executa um processamento da fila. A requisição chama logo depois de enfileirar, e o worker
+     * (bin/processar-fila.php) chama para os que ficaram para trás com a reserva vencida.
      * Débito, crédito e registro da movimentação são gravados juntos ou desfeitos juntos;
      * na falha, a transferência fica como FALHOU e o processamento vai para falhas_processamento.
      */
-    private function processar(int $processamentoId): void
+    public function processar(int $processamentoId): void
     {
         $processamento = $this->processamentoRepository->reservar($processamentoId);
+
+        // Outro processo está com a reserva válida: só ele processa, para não debitar duas vezes.
+        if ($processamento === null) {
+            return;
+        }
+
         $dados = json_decode($processamento['dados'], true, flags: JSON_THROW_ON_ERROR);
+
+        if ($processamento['tentativas'] > self::MAXIMO_TENTATIVAS) {
+            $this->falhar($processamento, $dados, new RuntimeException('Limite de tentativas atingido.'));
+        }
 
         $this->transferenciaRepository->atualizarStatus($dados['transferenciaId'], StatusTransferencia::Processando);
 
@@ -83,11 +97,16 @@ final class TransferenciaService
                 $this->pdo->rollBack();
             }
 
-            $this->transferenciaRepository->atualizarStatus($dados['transferenciaId'], StatusTransferencia::Falhou);
-            $this->processamentoRepository->registrarFalha($processamento, $dados['uuid'], $erro);
-
-            throw $erro;
+            $this->falhar($processamento, $dados, $erro);
         }
+    }
+
+    private function falhar(array $processamento, array $dados, Throwable $erro): never
+    {
+        $this->transferenciaRepository->atualizarStatus($dados['transferenciaId'], StatusTransferencia::Falhou);
+        $this->processamentoRepository->registrarFalha($processamento, $dados['uuid'], $erro);
+
+        throw $erro;
     }
 
     private function debitarECreditar(array $dados): void
