@@ -28,4 +28,9 @@ final class Conta
 
         $this->saldoCentavos += $valorCentavos;
     }
+
+    public function restaurarSaldo(int $saldoCentavos): void
+    {
+        $this->saldoCentavos = $saldoCentavos;
+    }
 }

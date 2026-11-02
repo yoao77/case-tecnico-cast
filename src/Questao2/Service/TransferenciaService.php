@@ -9,6 +9,7 @@ use App\Exceptions\SaldoInsuficienteException;
 use App\Questao2\Entity\Conta;
 use App\Questao2\Exceptions\ContaBloqueadaException;
 use App\Questao2\Repository\MovimentacaoRepository;
+use Throwable;
 
 final class TransferenciaService
 {
@@ -26,14 +27,26 @@ final class TransferenciaService
             throw new SaldoInsuficienteException();
         }
 
-        // Correção: sem transação, nada desfaz o débito. Por isso tudo o que pode falhar é conferido
-        // antes da primeira alteração; antes, o bloqueio só era visto no creditar, com a origem já debitada.
+        // Correção, parte 1: o que já se sabe que pode falhar é conferido antes da primeira alteração.
+        // Antes, o bloqueio só era visto no creditar, com a origem já debitada.
         if ($destino->bloqueada) {
             throw new ContaBloqueadaException($destino->id);
         }
 
-        $origem->debitar($valorCentavos);
-        $destino->creditar($valorCentavos);
-        $this->movimentacaoRepository->registrar($origem->id, $destino->id, $valorCentavos);
+        $saldoOrigem = $origem->saldoCentavos;
+        $saldoDestino = $destino->saldoCentavos;
+
+        // Correção, parte 2: transação em memória. Se qualquer passo falhar depois do débito, inclusive
+        // por algo que a validação não previu, os saldos voltam ao que eram e o erro segue para quem chamou.
+        try {
+            $origem->debitar($valorCentavos);
+            $destino->creditar($valorCentavos);
+            $this->movimentacaoRepository->registrar($origem->id, $destino->id, $valorCentavos);
+        } catch (Throwable $erro) {
+            $origem->restaurarSaldo($saldoOrigem);
+            $destino->restaurarSaldo($saldoDestino);
+
+            throw $erro;
+        }
     }
 }
