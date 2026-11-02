@@ -196,8 +196,6 @@ O `FOR UPDATE` trava a linha daquela conta até o `COMMIT` ou `ROLLBACK`. Uma se
 
 Mesmo sem a trava, o `CHECK (saldo_centavos >= 0)` da tabela é a última barreira: o banco recusa qualquer débito que deixaria o saldo negativo. Numa corrida, o saldo não fica errado, mas a transferência que perder recebe 500 em vez de 409.
 
-O servidor embutido do PHP atende uma requisição por vez, então no `docker compose up` normal essa corrida nem acontece. Para reproduzi-la, suba o servidor com `PHP_CLI_SERVER_WORKERS=4`.
-
 ## O que eu melhoraria para uso real
 
 - **Banco de verdade** (PostgreSQL ou MySQL), com o `SELECT ... FOR UPDATE` ligado, índices em `conta_origem_id` e `conta_destino_id` e migrations versionadas (Phinx ou Doctrine Migrations).
