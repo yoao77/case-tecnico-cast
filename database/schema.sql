@@ -42,3 +42,5 @@ CREATE TABLE falhas_processamento (
     excecao   LONGTEXT NOT NULL,
     falhou_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE contas ADD COLUMN bloqueada BOOLEAN NOT NULL DEFAULT 0 CHECK (bloqueada IN (0, 1));

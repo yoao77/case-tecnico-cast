@@ -13,6 +13,7 @@ O SQL que realmente roda fica em [`database/schema.sql`](../../database/schema.s
 | 3 | [003_criar_tabela_transferencias_contas.md](003_criar_tabela_transferencias_contas.md) | `transferencias_contas` |
 | 4 | [004_criar_tabela_processamentos.md](004_criar_tabela_processamentos.md) | `processamentos` |
 | 5 | [005_criar_tabela_falhas_processamento.md](005_criar_tabela_falhas_processamento.md) | `falhas_processamento` |
+| 6 | [006_adicionar_coluna_bloqueada_em_contas.md](006_adicionar_coluna_bloqueada_em_contas.md) | `contas` (questão 2) |
 
 ## Relacionamentos
 
@@ -22,6 +23,7 @@ erDiagram
         INTEGER id PK
         INTEGER saldo_centavos
         DATETIME atualizado_em
+        BOOLEAN bloqueada
     }
     transferencia {
         INTEGER id PK
@@ -71,6 +73,7 @@ O SQLite não tem tipos rígidos, ele trabalha com afinidade. Os tipos do planej
 | `BigInt` (FK) | `BIGINT` | Aceito como está (afinidade inteira). |
 | `Decimal(15,2)` | `INTEGER` | Os valores são centavos inteiros: 3000 = R$ 30,00. Sem casas decimais, sem arredondamento. |
 | `enum` | `TEXT` + `CHECK` | O SQLite não tem enum; o `CHECK` recusa qualquer status fora da lista. |
+| `Boolean` | `BOOLEAN` + `CHECK` | O SQLite guarda como inteiro; o `CHECK` só aceita `0` ou `1`. |
 | `TINYINT`, `LONGTEXT`, `DATETIME` | iguais | Aceitos como estão. As datas são gravadas em texto ISO (`2026-10-31 18:52:57`), em UTC. |
 
 As chaves estrangeiras só valem no SQLite com `PRAGMA foreign_keys = ON`, que é ligado em toda conexão (`src/Database/BancoDeDados.php`).
