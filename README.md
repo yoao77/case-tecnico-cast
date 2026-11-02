@@ -4,6 +4,8 @@ Uma API pequena, em Slim 4 e PHP 8.4, que transfere dinheiro entre duas contas f
 
 Todo valor é um **inteiro em centavos**: `3000` são R$ 30,00. Não existe vírgula nem arredondamento em lugar nenhum.
 
+O repositório também responde a **questão 2** do case (investigar e corrigir uma falha), num módulo separado da API: veja [Questão 2](#questão-2-investigar-e-corrigir-uma-falha).
+
 ## Como rodar
 
 Você só precisa do Docker.
@@ -89,6 +91,8 @@ docker compose exec api vendor/bin/pest
 ```
 
 São 18 casos de teste: sucesso, saldo insuficiente, nove variações de entrada inválida, conta inexistente, ordem do histórico e o comportamento da fila. Todos conferem os saldos e as movimentações depois da operação, não só o código HTTP. O detalhe de cada cenário está em [`docs/testes`](docs/testes/README.md).
+
+O mesmo comando também roda os 4 testes da [questão 2](#testes-da-questão-2), que ficam em `tests/Questao2`.
 
 ## Como a transferência é processada
 
@@ -183,6 +187,155 @@ O servidor embutido do PHP atende uma requisição por vez, então no `docker co
 - **Nginx + PHP-FPM** no lugar do servidor embutido do PHP, que é só para desenvolvimento.
 - **Observabilidade:** um id de correlação por requisição, rotação dos logs, dados sensíveis mascarados, métricas e alertas.
 
+## Questão 2: investigar e corrigir uma falha
+
+A segunda questão do case traz um serviço de transferência com estado em memória, sem transação, que perde dinheiro quando a conta de destino está bloqueada. O código dela fica separado da API, em `src/Questao2`, com testes próprios em `tests/Questao2`. Nada da questão 1 mudou: rotas, respostas e testes continuam iguais.
+
+### O problema
+
+Conta A com 10000 centavos, conta B com 5000 e bloqueada, transferência de 3000 de A para B. O serviço devolve erro, mas termina com A = 7000 e B = 5000: os 3000 centavos somem. O esperado era A = 10000 e B = 5000, sem movimentação.
+
+### A causa
+
+O serviço confere o valor e o saldo da origem, debita a origem e só depois chama `creditar`, que é onde o bloqueio do destino é verificado:
+
+```
+transferir(origem, destino, valor):
+    se valor <= 0: falhar("valor inválido")
+    se origem.saldo < valor: falhar("saldo insuficiente")
+    origem.saldo = origem.saldo - valor        ← A já perdeu os 3000
+    creditar(destino, valor)                   ← falha aqui: B está bloqueada
+    registrarMovimentacao(origem, destino, valor)
+```
+
+Como não há transação, nada desfaz o débito quando `creditar` lança a exceção. A operação é interrompida no meio: a origem já foi debitada, o destino nunca é creditado e a movimentação nunca é registrada.
+
+### A correção
+
+A correção mínima é conferir o bloqueio do destino junto com as outras validações, **antes** de mexer em qualquer saldo. Assim, tudo o que pode falhar acontece antes da primeira alteração:
+
+```diff
+  if ($origem->saldoCentavos < $valorCentavos) {
+      throw new SaldoInsuficienteException();
+  }
+
++ if ($destino->bloqueada) {
++     throw new ContaBloqueadaException($destino->id);
++ }
++
+  $origem->debitar($valorCentavos);
+  $destino->creditar($valorCentavos);
+  $this->movimentacaoRepository->registrar($origem->id, $destino->id, $valorCentavos);
+```
+
+O erro não é engolido: o serviço continua lançando `ContaBloqueadaException`, só que agora antes de qualquer alteração. O `Conta::creditar` mantém a própria verificação, então a entidade continua recusando crédito em conta bloqueada, venha a chamada de onde vier.
+
+| Arquivo em `src/Questao2` | O que é |
+| ------------------------- | ------- |
+| `Entity/Conta.php` | A conta em memória: `id`, `saldoCentavos` e a nova flag `bloqueada`. |
+| `Service/TransferenciaOriginalService.php` | O pseudocódigo do case traduzido como veio, **com a falha**. Fica no projeto só para o teste reproduzir o problema. |
+| `Service/TransferenciaService.php` | A versão corrigida. |
+| `Repository/MovimentacaoRepository.php` | Guarda as movimentações num array. |
+| `Exceptions/ContaBloqueadaException.php` | O erro de conta bloqueada. |
+
+As validações de valor e de saldo reaproveitam as exceções da questão 1 (`DadosInvalidosException` e `SaldoInsuficienteException`). A flag também ganhou uma coluna na tabela `contas` ([migration 006](docs/migrations/006_adicionar_coluna_bloqueada_em_contas.md)), com padrão `0`. A API da questão 1 não lê essa coluna, então continua igual.
+
+### Testes da questão 2
+
+```bash
+docker compose exec api vendor/bin/pest tests/Questao2
+```
+
+Todos começam com A = 10000 e B = 5000 e transferem de A para B. Os dois primeiros são o mesmo cenário rodando nos dois serviços, o que mostra a falha e a correção lado a lado:
+
+| Cenário | Serviço | Resultado |
+| ------- | ------- | --------- |
+| Falha original: B bloqueada, 3000 | original | Erro, com A = 7000, B = 5000 e nenhuma movimentação. É a falha reproduzida. |
+| Correção: B bloqueada, 3000 | corrigido | Erro, com A = 10000, B = 5000 e nenhuma movimentação. |
+| Sucesso: B desbloqueada, 3000 | corrigido | A = 7000, B = 8000 e uma movimentação registrada. |
+| Saldo insuficiente: 10001 | corrigido | Erro, com A = 10000, B = 5000 e nenhuma movimentação. |
+
+### Por que essa correção não prova segurança contra falha de banco nem requisições simultâneas
+
+O exercício propõe solucionar um problema específico, mas existem outros cenários de falhas que podem ser considerados questões externas à implementação, como falhas no banco de dados e requisições simultâneas.
+
+Para esta questão, conseguimos tratar apenas a atomicidade das operações em memória que compõem a transação, garantindo também uma ordem segura de execução dessas operações.
+
+Exemplo: se alguma validação falhar, nenhuma alteração nos saldos é realizada, pois todas as validações acontecem antes das operações de débito e crédito. Dessa forma, evitamos que uma falha deixe os saldos inconsistentes. Na resolução, garanti que o destino fosse validado antes de debitar o saldo da origem.
+
+#### Falha no banco de dados
+
+A correção desse exemplo não prova segurança diante de falhas no banco de dados, pois, durante todo esse processo, podem acontecer alguns cenários, como o banco de dados ficar indisponível durante o `COMMIT` de uma gravação ou a aplicação perder a conexão com o banco de dados, ficando sem saber se aqueles dados foram realmente persistidos nas tabelas.
+
+Podemos lidar com esses cenários utilizando a idempotência, garantindo que o usuário possa realizar novamente a mesma solicitação de transferência com segurança, sem correr o risco de duplicar uma operação que já tenha sido efetivada. Para isso, é necessário utilizar um identificador único para cada operação e consultar seu estado antes de tentar executá-la novamente.
+
+```mermaid
+sequenceDiagram
+    participant Cliente
+    participant API
+    participant Banco
+
+    Cliente->>API: POST /transferencias<br/>Idempotency-Key: pedido-123
+    API->>Banco: debita A, credita B e faz o COMMIT
+    Banco--xAPI: a conexão cai
+    Note over API: o COMMIT foi gravado ou não?
+    API-->>Cliente: erro ou timeout
+    Cliente->>API: repete com a mesma chave pedido-123
+    API->>Banco: já existe transferência com a chave pedido-123?
+    alt já existe
+        Banco-->>API: sim, CONCLUIDA
+        API-->>Cliente: devolve a transferência original, sem debitar de novo
+    else não existe
+        Banco-->>API: não
+        API->>Banco: executa a transferência agora
+        API-->>Cliente: 201 Created
+    end
+```
+
+#### Requisições simultâneas
+
+Também não resolve o problema de requisições simultâneas, pois, no que foi desenvolvido, não existe nenhum mecanismo que garanta que, ao receber várias requisições, a aplicação não utilize um saldo desatualizado durante o processamento de operações simultâneas.
+
+Exemplo:
+
+Conta 1 possui R$ 100,00.
+
+- Transação 1 → 10:12:00 → Conta 1 realiza uma transferência de R$ 80,00.
+- Transação 2 → 10:12:00 → Conta 1 realiza outra transferência de R$ 80,00.
+
+Durante o processamento das transações, pode acontecer de ambas consultarem o saldo de R$ 100,00, considerando que esse seja o saldo correto da conta. Assim, as duas podem entender que existe saldo suficiente para realizar a transferência, mesmo que estejam processando operações simultaneamente.
+
+Esse problema é conhecido como condição de corrida (_Race Condition_).
+
+Para mitigar esse problema, pode ser criado um lock no banco de dados ou em memória, garantindo que uma transação aguarde a outra terminar de processar antes de iniciar uma operação que possa afetar o mesmo saldo.
+
+```mermaid
+sequenceDiagram
+    participant T1 as Transação 1 (R$ 80)
+    participant C as Conta 1
+    participant T2 as Transação 2 (R$ 80)
+
+    Note over T1,T2: Sem lock, a conta começa com R$ 100
+    T1->>C: lê o saldo
+    C-->>T1: R$ 100, cobre os R$ 80
+    T2->>C: lê o saldo
+    C-->>T2: R$ 100, cobre os R$ 80
+    T1->>C: debita R$ 80, saldo vai a R$ 20
+    T2->>C: debita R$ 80, saldo vai a -R$ 60
+    Note over C: só havia saldo para uma
+
+    Note over T1,T2: Com lock, a conta começa com R$ 100
+    T1->>C: trava a conta e lê o saldo
+    C-->>T1: R$ 100, cobre os R$ 80
+    T2-->>C: tenta travar e fica esperando
+    T1->>C: debita R$ 80, saldo vai a R$ 20, e libera
+    T2->>C: trava a conta e lê o saldo
+    C-->>T2: R$ 20, não cobre os R$ 80
+    Note over T2: recusada por saldo insuficiente
+```
+
+A API da questão 1 já traz essas duas proteções prontas para ligar: veja [Idempotência e concorrência](#idempotência-e-concorrência-desativadas).
+
 ## Estrutura do projeto
 
 ```
@@ -203,9 +356,12 @@ O servidor embutido do PHP atende uma requisição por vez, então no `docker co
 │   ├── Handler/               transforma exceções em resposta JSON
 │   ├── Http/                  resposta JSON compartilhada
 │   ├── Middleware/            log de requisições
+│   ├── Questao2/              módulo da questão 2 (transferência em memória)
 │   ├── Repository/            acesso ao banco (PDO)
 │   ├── Service/               regras de negócio
 │   └── Validation/            validação da entrada
-├── tests/Feature/             testes Pest
+├── tests/
+│   ├── Feature/               testes Pest da API
+│   └── Questao2/              testes da questão 2
 └── var/logs/requisicoes.log   log de requisições
 ```
