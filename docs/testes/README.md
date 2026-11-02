@@ -54,12 +54,15 @@ Os helpers ficam em `tests/Pest.php`. O principal é o `verificarQueNadaMudou()`
 
 ### `ProcessamentoTest.php`
 
-Confere a fila por dentro, direto no banco:
+Confere a fila por dentro, direto no banco. Os três últimos cenários montam um processamento parado, como fica quando o processo cai no meio, e chamam o `processar()` como o worker faz:
 
 | Cenário | O que verifica |
 | ------- | -------------- |
 | Processamento concluído | A transferência fica `CONCLUIDA`, a fila (`processamentos`) fica vazia e não há falha registrada. |
 | Processamento com falha | Com saldo insuficiente, a transferência fica `FALHOU`, a fila fica vazia e `falhas_processamento` guarda os dados do pedido e a `SaldoInsuficienteException`. |
+| Retomada pelo worker | Um processamento parado (transferência em `PROCESSANDO`, reservado há 60 segundos) aparece para o worker, é concluído e a conta A é debitada uma vez só: A = 97000, B = 53000, uma movimentação e a fila vazia. |
+| Reserva ainda valendo | Reservado há 5 segundos, o processamento não aparece para o worker e não é reservado de novo: as tentativas continuam 1 e saldos e movimentações não mudam. |
+| Limite de tentativas | Na quarta reserva, a transferência fica `FALHOU`, o processamento vai para `falhas_processamento` com `Limite de tentativas atingido.` e os saldos não mudam. |
 
 ### `Questao2/TransferenciaTest.php`
 
@@ -85,4 +88,4 @@ Os dois primeiros cenários são o mesmo (B bloqueada, 3000 de A para B), rodand
 | Questão 2: sucesso com B desbloqueada | Sucesso com B desbloqueada |
 | Questão 2: saldo insuficiente | Saldo insuficiente (`Questao2/TransferenciaTest`) |
 
-No total são 23 casos de teste: 18 da API (contando cada variação de entrada inválida) e 5 da questão 2.
+No total são 26 casos de teste: 21 da API (contando cada variação de entrada inválida) e 5 da questão 2.

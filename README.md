@@ -90,7 +90,7 @@ Em qualquer erro a resposta tem o mesmo formato, `{"erro": "..."}`, e **nada mud
 docker compose exec api vendor/bin/pest
 ```
 
-São 18 casos de teste: sucesso, saldo insuficiente, nove variações de entrada inválida, conta inexistente, ordem do histórico e o comportamento da fila. Todos conferem os saldos e as movimentações depois da operação, não só o código HTTP. O detalhe de cada cenário está em [`docs/testes`](docs/testes/README.md).
+São 21 casos de teste: sucesso, saldo insuficiente, nove variações de entrada inválida, conta inexistente, ordem do histórico, o comportamento da fila e a retomada pelo worker. Todos conferem os saldos e as movimentações depois da operação, não só o código HTTP. O detalhe de cada cenário está em [`docs/testes`](docs/testes/README.md).
 
 O mesmo comando também roda os 5 testes da [questão 2](#testes-da-questão-2), que ficam em `tests/Questao2`.
 
@@ -104,6 +104,27 @@ As tabelas `processamentos` e `falhas_processamento` funcionam como as `jobs` e 
 4. O processamento é reservado (`tentativas` + 1, `reservado_em`) e a transferência passa a `PROCESSANDO`.
 5. Numa **única transação SQL**: confere o saldo, debita a origem, credita o destino, grava a movimentação em `transferencias_contas`, marca `CONCLUIDA` e tira o processamento da fila.
 6. Se qualquer coisa falhar no passo 5, a transação é desfeita inteira: a transferência fica `FALHOU` e o processamento vai para `falhas_processamento` com o motivo (409 no caso de saldo insuficiente).
+
+### O worker: retomando o que ficou para trás
+
+Se o processo cai no meio, por timeout ou reinício do contêiner, a transferência fica parada em `PROCESSANDO` e o processamento continua reservado na fila. A transação do passo 5 garante que nenhum saldo fica pela metade, mas nada termina o trabalho. O worker resolve isso, como o `queue:work` do Laravel:
+
+```bash
+docker compose exec api sh bin/worker.sh
+```
+
+- A cada 5 segundos, o `bin/worker.sh` roda o `bin/processar-fila.php`, que pega os processamentos com a **reserva vencida** (mais de 30 segundos, como o `retry_after` do Laravel) e roda o mesmo processamento da requisição.
+- A reserva é condicional: só reserva quem encontra o processamento livre ou vencido. Assim o worker e uma requisição nunca processam o mesmo pedido juntos, e ninguém debita duas vezes.
+- Depois de 3 tentativas, desiste: a transferência fica `FALHOU` e o processamento vai para `falhas_processamento` com `Limite de tentativas atingido.`.
+
+A API continua respondendo na hora, porque o case pede 201 ou 409 na resposta. O worker só cuida do que ficou para trás.
+
+Para ver funcionando junto com a idempotência (com ela ligada):
+
+1. Coloque um `throw new \RuntimeException('queda simulada');` logo depois do `atualizarStatus(... Processando)` no `TransferenciaService::processar`, para simular a queda.
+2. Faça a transferência com `Idempotency-Key: pedido-123`: a resposta é 500 e a transferência fica `PROCESSANDO`. Repetir a chave agora devolve a transferência parada, sem debitar de novo.
+3. Tire o `throw` e suba o worker. Depois de 30 segundos ele mostra `Processamento 1: concluído.`.
+4. Repita a requisição com a mesma chave: ela volta `CONCLUIDA`, com origem, destino e valor, e a conta A foi debitada uma vez só.
 
 As tabelas, colunas e relacionamentos estão documentados em [`docs/migrations`](docs/migrations/README.md).
 
@@ -353,7 +374,10 @@ A API da questão 1 já traz essas duas proteções prontas para ligar: veja [Id
 ## Estrutura do projeto
 
 ```
-├── bin/criar-banco.php        cria as tabelas e as contas iniciais
+├── bin/
+│   ├── criar-banco.php        cria as tabelas e as contas iniciais
+│   ├── processar-fila.php     processa uma vez o que ficou para trás na fila
+│   └── worker.sh              roda o processar-fila.php a cada 5 segundos
 ├── config/                    container (PHP-DI), middlewares e rotas
 ├── database/                  schema.sql e seed.sql
 ├── docs/
