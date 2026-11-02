@@ -90,7 +90,7 @@ Em qualquer erro a resposta tem o mesmo formato, `{"erro": "..."}`, e **nada mud
 docker compose exec api vendor/bin/pest
 ```
 
-São 21 casos de teste: sucesso, saldo insuficiente, nove variações de entrada inválida, conta inexistente, ordem do histórico, o comportamento da fila e a retomada pelo worker. Todos conferem os saldos e as movimentações depois da operação, não só o código HTTP. O detalhe de cada cenário está em [`docs/testes`](docs/testes/README.md).
+São 21 casos de teste: sucesso, saldo insuficiente, nove variações de entrada inválida, conta inexistente, ordem do histórico, o comportamento da fila e a retomada pelo worker. Os de transferência (sucesso e erros) e os do worker conferem os saldos e as movimentações depois da operação, não só o código HTTP. O detalhe de cada cenário está em [`docs/testes`](docs/testes/README.md).
 
 O mesmo comando também roda os 5 testes da [questão 2](#testes-da-questão-2), que ficam em `tests/Questao2`.
 
@@ -145,7 +145,7 @@ As tabelas, colunas e relacionamentos estão documentados em [`docs/migrations`]
 
 ## Persistência: SQLite em memória e a limitação
 
-O banco é SQLite **em memória**, mas com um detalhe importante. No PHP, cada requisição roda num processo novo, e um SQLite `:memory:` morre junto com ela: o `POST` debitaria e o `GET` seguinte voltaria a mostrar 100000.
+O banco é SQLite **em memória**, mas com um detalhe importante. No PHP, cada requisição começa do zero e abre a própria conexão com o banco, e um SQLite `:memory:` morre junto com a conexão que o criou: o `POST` debitaria e o `GET` seguinte voltaria a mostrar 100000.
 
 Por isso o banco é um arquivo dentro de um **tmpfs**, uma pasta montada na RAM pelo `docker-compose.yml`. Ele vive na memória e é compartilhado entre as requisições enquanto o contêiner está de pé. Os testes, que rodam num processo só, usam o `:memory:` de verdade.
 
@@ -194,7 +194,7 @@ O `FOR UPDATE` trava a linha daquela conta até o `COMMIT` ou `ROLLBACK`. Uma se
 1. `ContaRepository::buscarPorIdParaAtualizacao`: a consulta com `FOR UPDATE`.
 2. `TransferenciaService::debitarECreditar`: a linha que lê o saldo por ela, no lugar do `buscarPorId`.
 
-Mesmo sem a trava, o `CHECK (saldo_centavos >= 0)` da tabela é a última barreira: o banco recusa qualquer débito que deixaria o saldo negativo. Numa corrida, o saldo não fica errado, mas a transferência que perder recebe 500 em vez de 409.
+Mesmo sem o `FOR UPDATE`, o saldo não fica errado no SQLite: ele trava o banco inteiro para gravar, então as transferências gravam uma de cada vez, e o `CHECK (saldo_centavos >= 0)` da tabela é a última barreira contra saldo negativo. Na prática, quando duas transferências da mesma conta chegam juntas, uma conclui (201) e a outra recebe 409. Com muitas ao mesmo tempo, alguma pode receber 500 (`database is locked`) em vez de 409.
 
 ## O que eu melhoraria para uso real
 

@@ -22,10 +22,10 @@ docker compose run --rm api sh -c "composer install && vendor/bin/pest"
 
 - Cada teste sobe a aplicação Slim de verdade, com rotas, middlewares e tratamento de erro, e faz requisições HTTP direto nela, sem servidor.
 - O banco é um SQLite `:memory:` novo a cada teste, já com a conta A (id 1, 100000 centavos) e a conta B (id 2, 50000 centavos). Um teste nunca enxerga o que outro fez.
-- Os testes não param no código HTTP: depois de cada operação, eles consultam os saldos e as movimentações pelas próprias rotas da API.
+- Os testes de transferência (sucesso e erros) e os do worker não param no código HTTP: depois da operação, consultam os saldos e as movimentações pelas próprias rotas da API.
 - O log de requisições é trocado por um `NullLogger` para os testes não sujarem `var/logs`.
 
-Os helpers ficam em `tests/Pest.php`. O principal é o `verificarQueNadaMudou()`, que confere se os saldos continuam 100000 e 50000 e se as duas contas seguem sem movimentação. Ele é usado em todo cenário de erro.
+Os helpers ficam em `tests/Pest.php`. O principal é o `verificarQueNadaMudou()`, que confere se os saldos continuam 100000 e 50000 e se as duas contas seguem sem movimentação. Ele é usado nos cenários de erro do `TransferenciaTest` e do worker.
 
 ### Questão 2 (`tests/Questao2`)
 
@@ -83,7 +83,7 @@ Os dois primeiros cenários são o mesmo (B bloqueada, 3000 de A para B), rodand
 | Teste de sucesso | Transferência com sucesso |
 | Teste de saldo insuficiente | Saldo insuficiente |
 | Teste de entrada inválida | Entrada inválida (9 variações) |
-| Verificar saldos e movimentações, não só o HTTP | Todos os cenários de `TransferenciaTest` |
+| Verificar saldos e movimentações, não só o HTTP | Os cenários de sucesso e de erro do `TransferenciaTest` |
 | Questão 2: teste que demonstra a falha original e a correção | Falha original e Correção |
 | Questão 2: sucesso com B desbloqueada | Sucesso com B desbloqueada |
 | Questão 2: saldo insuficiente | Saldo insuficiente (`Questao2/TransferenciaTest`) |
