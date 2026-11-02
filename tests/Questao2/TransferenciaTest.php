@@ -38,6 +38,18 @@ it('com a correção, B bloqueada não altera saldos nem cria movimentação', f
         ->and($this->movimentacaoRepository->listar())->toBe([]);
 });
 
+it('desfaz o débito quando algo falha depois dele, como o saldo de B estourar o limite do inteiro', function () {
+    $contaB = new Conta(CONTA_B, PHP_INT_MAX);
+    $servico = new TransferenciaService($this->movimentacaoRepository);
+
+    expect(fn () => $servico->transferir($this->contaA, $contaB, 3000))
+        ->toThrow(TypeError::class);
+
+    expect($this->contaA->saldoCentavos)->toBe(10000)
+        ->and($contaB->saldoCentavos)->toBe(PHP_INT_MAX)
+        ->and($this->movimentacaoRepository->listar())->toBe([]);
+});
+
 it('transfere com B desbloqueada, atualiza os saldos e registra a movimentação', function () {
     $contaB = new Conta(CONTA_B, 5000);
     $servico = new TransferenciaService($this->movimentacaoRepository);
