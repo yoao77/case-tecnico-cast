@@ -8,11 +8,14 @@ use Monolog\Logger;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Log\LoggerInterface;
 use Slim\Psr7\Factory\ResponseFactory;
+use Slim\Views\Twig;
 
 use function DI\autowire;
 
 return [
     PDO::class => fn (): PDO => BancoDeDados::conectar(__DIR__ . '/../var/banco/transferencias.sqlite'),
+
+    Twig::class => fn (): Twig => Twig::create(__DIR__ . '/../templates'),
 
     LoggerInterface::class => fn (): LoggerInterface => new Logger('requisicoes', [
         new StreamHandler(__DIR__ . '/../var/logs/requisicoes.log'),

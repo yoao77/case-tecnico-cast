@@ -1,0 +1,271 @@
+{# Página do painel (GET /painel), montada pelo PainelController::exibir. #}
+
+{% macro reais(centavos) %}R$ {{ (centavos / 100)|number_format(2, ',', '.') }}{% endmacro %}
+
+{% macro ha_quanto_tempo(instante) %}
+    {%- set segundos = max(0, 'now'|date('U') - instante) -%}
+    {%- if segundos < 60 %}há {{ segundos }} s
+    {%- elseif segundos < 3600 %}há {{ segundos // 60 }} min
+    {%- else %}há {{ segundos // 3600 }} h
+    {%- endif -%}
+{% endmacro %}
+
+{% macro contas(linha) %}{{ linha.origem is null ? '—' : linha.origem ~ ' → ' ~ linha.destino }}{% endmacro %}
+
+{% macro valor(linha) %}{{ linha.valorCentavos is null ? '—' : _self.reais(linha.valorCentavos) }}{% endmacro %}
+
+{% macro link(conta) %}{{ conta is null ? '/painel' : '/painel?conta=' ~ conta }}{% endmacro %}
+
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Painel · API de Transferências</title>
+    <style>
+        :root {
+            --fundo: #f4f5f7;
+            --cartao: #ffffff;
+            --borda: #e2e5e9;
+            --texto: #1c2127;
+            --suave: #67717c;
+            --destaque: #2f6fdb;
+            --verde: #1d8348;
+            --vermelho: #c0392b;
+            --amarelo: #a46400;
+            --cinza: #5d6874;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --fundo: #131619;
+                --cartao: #1c2024;
+                --borda: #2d3238;
+                --texto: #e5e8eb;
+                --suave: #97a1ab;
+                --destaque: #6b9fff;
+                --verde: #4cc382;
+                --vermelho: #ff7b72;
+                --amarelo: #e3b341;
+                --cinza: #9aa5b1;
+            }
+        }
+
+        * { box-sizing: border-box; }
+        body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--fundo); color: var(--texto); }
+        main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+        code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+        header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        h1 { margin: 0; font-size: 22px; }
+        header p { margin: 2px 0 0; color: var(--suave); }
+        .acoes { display: flex; gap: 8px; }
+        .botao { padding: 6px 14px; border: 1px solid var(--borda); border-radius: 6px; background: var(--cartao); color: var(--texto); text-decoration: none; font-weight: 500; }
+        .botao.principal { background: var(--destaque); border-color: var(--destaque); color: #fff; }
+
+        .cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 8px; padding: 14px 16px; }
+        .cartao span, .cartao small { display: block; color: var(--suave); font-size: 12px; }
+        .cartao strong { display: block; margin: 2px 0; font-size: 22px; font-variant-numeric: tabular-nums; }
+
+        section { background: var(--cartao); border: 1px solid var(--borda); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+        .topo-secao { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        h2 { margin: 0; font-size: 16px; }
+        h2 code { margin-left: 6px; font-weight: 400; color: var(--suave); }
+        .abas { display: flex; flex-wrap: wrap; gap: 4px; }
+        .abas a { padding: 4px 10px; border-radius: 6px; color: var(--suave); text-decoration: none; }
+        .abas a.ativa { background: var(--fundo); color: var(--texto); font-weight: 600; }
+
+        .tabela { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 10px; border-top: 1px solid var(--borda); text-align: left; white-space: nowrap; vertical-align: top; }
+        th { border-top: 0; color: var(--suave); font-size: 12px; font-weight: 500; }
+        .numero { text-align: right; font-variant-numeric: tabular-nums; }
+
+        .status { display: inline-block; padding: 0 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; font-weight: 600; }
+        .status-concluida { color: var(--verde); }
+        .status-falhou { color: var(--vermelho); }
+        .status-processando { color: var(--amarelo); }
+        .status-pendente { color: var(--cinza); }
+        .entrada { color: var(--verde); }
+        .saida { color: var(--vermelho); }
+        .suave { color: var(--suave); }
+        .alerta { color: var(--amarelo); font-weight: 600; }
+        .vazio { margin: 0; padding: 12px 0 4px; color: var(--suave); }
+
+        td.excecao { min-width: 320px; white-space: normal; }
+        details summary { cursor: pointer; }
+        details pre { margin: 8px 0 0; padding: 8px; border-radius: 6px; background: var(--fundo); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+    </style>
+</head>
+<body>
+<main>
+    <header>
+        <div>
+            <h1>Painel</h1>
+            <p>API de Transferências · só leitura, para acompanhar a demonstração</p>
+        </div>
+        <div class="acoes">
+            <a class="botao" href="/swagger/">Swagger</a>
+            <a class="botao principal" href="{{ _self.link(contaSelecionada) }}">Atualizar</a>
+        </div>
+    </header>
+
+    <div class="cartoes">
+        {% for conta in contas %}
+            <div class="cartao">
+                <span>Conta {{ conta.id }}</span>
+                <strong>{{ _self.reais(conta.saldoCentavos) }}</strong>
+                <small>{{ conta.saldoCentavos }} centavos · atualizada {{ _self.ha_quanto_tempo(conta.atualizadoEm) }}</small>
+            </div>
+        {% endfor %}
+        <div class="cartao">
+            <span>Na fila</span>
+            <strong>{{ processamentos|length }}</strong>
+            <small>na tabela processamentos</small>
+        </div>
+        <div class="cartao">
+            <span>Falhas</span>
+            <strong>{{ falhas|length }}</strong>
+            <small>na tabela falhas_processamento</small>
+        </div>
+    </div>
+
+    <section>
+        <div class="topo-secao">
+            <h2>Transferências ({{ transferencias|length }}) <code>transferencia</code></h2>
+            <nav class="abas">
+                <a href="/painel" class="{{ contaSelecionada is null ? 'ativa' }}">Todas</a>
+                {% for conta in contas %}
+                    <a href="{{ _self.link(conta.id) }}" class="{{ contaSelecionada == conta.id ? 'ativa' }}">Conta {{ conta.id }}</a>
+                {% endfor %}
+            </nav>
+        </div>
+        {% if transferencias is empty %}
+            <p class="vazio">Nenhuma transferência{{ contaSelecionada is not null ? ' envolvendo a conta ' ~ contaSelecionada }}.</p>
+        {% else %}
+            <div class="tabela">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Origem → destino</th>
+                        <th class="numero">Valor</th>
+                        <th>Status</th>
+                        <th>Idempotency-Key</th>
+                        <th>Criada</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for transferencia in transferencias %}
+                        <tr>
+                            <td>{{ transferencia.id }}</td>
+                            <td>{{ _self.contas(transferencia) }}</td>
+                            {# No extrato de uma conta, a transferência concluída aparece com sinal: saiu (-) ou entrou (+). #}
+                            {% if contaSelecionada is not null and transferencia.status == 'CONCLUIDA' %}
+                                {% set saiu = transferencia.origem == contaSelecionada %}
+                                <td class="numero {{ saiu ? 'saida' : 'entrada' }}">{{ saiu ? '-' : '+' }}{{ _self.valor(transferencia) }}</td>
+                            {% else %}
+                                <td class="numero">{{ _self.valor(transferencia) }}</td>
+                            {% endif %}
+                            <td><span class="status status-{{ transferencia.status|lower }}">{{ transferencia.status }}</span></td>
+                            <td>
+                                {% if transferencia.idempotencia is null %}
+                                    <span class="suave">—</span>
+                                {% else %}
+                                    <code>{{ transferencia.idempotencia }}</code>
+                                {% endif %}
+                            </td>
+                            <td class="suave">{{ _self.ha_quanto_tempo(transferencia.criadoEm) }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </section>
+
+    <section>
+        <div class="topo-secao">
+            <h2>Fila de processamento ({{ processamentos|length }}) <code>processamentos</code></h2>
+        </div>
+        {% if processamentos is empty %}
+            <p class="vazio">Fila vazia: nenhum processamento parado.</p>
+        {% else %}
+            <div class="tabela">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Transferência</th>
+                        <th>Origem → destino</th>
+                        <th class="numero">Valor</th>
+                        <th class="numero">Tentativas</th>
+                        <th>Reserva</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for processamento in processamentos %}
+                        <tr>
+                            <td>{{ processamento.id }}</td>
+                            <td>{{ processamento.transferenciaId }}</td>
+                            <td>{{ _self.contas(processamento) }}</td>
+                            <td class="numero">{{ _self.valor(processamento) }}</td>
+                            <td class="numero">{{ processamento.tentativas }}</td>
+                            <td>
+                                {{ processamento.reservadoEm is null ? 'nunca reservado' : 'reservado ' ~ _self.ha_quanto_tempo(processamento.reservadoEm) }}
+                                {% if processamento.id in retomaveisPeloWorker %}
+                                    · <span class="alerta">o worker pode retomar</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </section>
+
+    <section>
+        <div class="topo-secao">
+            <h2>Falhas de processamento ({{ falhas|length }}) <code>falhas_processamento</code></h2>
+        </div>
+        {% if falhas is empty %}
+            <p class="vazio">Nenhuma falha registrada.</p>
+        {% else %}
+            <div class="tabela">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Transferência</th>
+                        <th>Origem → destino</th>
+                        <th class="numero">Valor</th>
+                        <th>Exceção</th>
+                        <th>Quando</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for falha in falhas %}
+                        <tr>
+                            <td>{{ falha.id }}</td>
+                            <td>{{ falha.transferenciaId }}</td>
+                            <td>{{ _self.contas(falha) }}</td>
+                            <td class="numero">{{ _self.valor(falha) }}</td>
+                            <td class="excecao">
+                                <details>
+                                    <summary>{{ falha.excecao|split("\n")|first }}</summary>
+                                    <pre>{{ falha.excecao }}</pre>
+                                </details>
+                            </td>
+                            <td class="suave">{{ _self.ha_quanto_tempo(falha.falhouEm) }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </section>
+</main>
+</body>
+</html>
