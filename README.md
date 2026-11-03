@@ -391,11 +391,23 @@ A API da questão 1 já traz essas duas proteções prontas para ligar: veja [Id
 - **Documentação da API:** especificação OpenAPI escrita à mão e Swagger UI, carregado do unpkg.
 - **Diagramas:** Mermaid, na questão 2 e em `docs/migrations`.
 - **Referências:** a fila segue as tabelas `jobs` e `failed_jobs`, o `retry_after` e o `queue:work` das [filas do Laravel](https://laravel.com/docs/queues). Documentação do [Slim 4](https://www.slimframework.com/docs/v4/), do [PHP-DI](https://php-di.org/doc/), do [Pest](https://pestphp.com/docs), do [PDO](https://www.php.net/manual/pt_BR/book.pdo.php) e das [transações no SQLite](https://www.sqlite.org/lang_transaction.html).
-- **Assistente de IA:** Claude Code, no apoio ao código, aos testes e à revisão do README.
+- **Assistente de IA:** Claude Code, no apoio ao código, aos testes e à revisão do README, seguindo o [fluxo de IA](#fluxo-de-ia) do projeto.
+
+## Fluxo de IA
+
+O desenvolvimento com IA tem um fluxo próprio, documentado em [`ia/CLAUDE.md`](ia/CLAUDE.md):
+
+- **Regras do projeto** que o Claude segue: camadas, nomes em português, centavos inteiros, testes no Docker e commits.
+- **Skills** `/feature` e `/manutencao`: eu escrevo o pedido num `context.md`, dentro de `ia/.operations/tasks` ou `ia/.operations/maintenance`, e a skill conduz a tarefa. Ela levanta dúvidas com grau de confiança, monta o plano, implementa e fecha com um relatório técnico e um de negócio. O `/grilling` sabatina um plano antes de implementar.
+- **Guards** de pre-commit, em Node, que barram debug esquecido, HTML montado no PHP e SQL fora do Repository.
+
+O `CLAUDE.md` e o `.claude/skills/` da raiz só apontam para `ia/`, para o fluxo valer desde o início da sessão. O hook dos guards é instalado uma vez por clone, como explicado no `ia/CLAUDE.md`.
 
 ## Estrutura do projeto
 
 ```
+├── .claude/skills/            links para as skills de ia/
+├── CLAUDE.md                  importa o ia/CLAUDE.md
 ├── bin/
 │   ├── criar-banco.php        cria as tabelas e as contas iniciais
 │   ├── processar-fila.php     processa uma vez o que ficou para trás na fila
@@ -405,6 +417,10 @@ A API da questão 1 já traz essas duas proteções prontas para ligar: veja [Id
 ├── docs/
 │   ├── migrations/            tabelas, colunas e relacionamentos
 │   └── testes/                cenários de teste
+├── ia/                        fluxo de desenvolvimento com IA
+│   ├── CLAUDE.md              regras do projeto e ciclo de uma tarefa
+│   ├── .claude/skills/        skills do projeto (/feature, /manutencao, /grilling)
+│   └── .operations/           tarefas, manutenções e guards de pre-commit
 ├── public/
 │   ├── index.php              entrada da API
 │   └── swagger/               página e especificação OpenAPI
