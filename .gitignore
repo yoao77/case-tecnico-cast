@@ -6,3 +6,6 @@
 .phpunit.cache/
 .phpunit.result.cache
 .DS_Store
+
+# Skills que o Claude sincroniza da conta: não fazem parte do projeto
+/ia/.claude/skills/synced/
