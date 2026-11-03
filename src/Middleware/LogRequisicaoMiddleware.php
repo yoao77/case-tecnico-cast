@@ -18,6 +18,11 @@ final class LogRequisicaoMiddleware implements MiddlewareInterface
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        // O painel de demonstração fica fora do log, para não misturar as visualizações com as chamadas da API.
+        if ($request->getUri()->getPath() === '/painel') {
+            return $handler->handle($request);
+        }
+
         $response = $handler->handle($request);
 
         $this->logger->info("{$request->getMethod()} {$request->getUri()->getPath()}", [
