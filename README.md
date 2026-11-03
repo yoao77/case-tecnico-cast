@@ -18,6 +18,7 @@ Na primeira vez o contêiner roda o `composer install`, então pode levar um min
 
 - API: http://localhost:8000
 - Swagger: http://localhost:8000/swagger/
+- Painel: http://localhost:8000/painel ([o que ele mostra](#painel-de-demonstração))
 
 Cada subida do contêiner é uma **execução limpa**: o banco é recriado com as contas iniciais. Para voltar ao estado inicial sem derrubar nada:
 
@@ -84,6 +85,17 @@ Em qualquer erro a resposta tem o mesmo formato, `{"erro": "..."}`, e **nada mud
 
 `GET /contas/99` e `GET /contas/99/movimentacoes` também respondem 404.
 
+## Painel de demonstração
+
+Para acompanhar o que acontece no banco durante a demonstração, o painel em http://localhost:8000/painel mostra numa página só:
+
+- o saldo de cada conta, em reais e em centavos;
+- todas as transferências, de qualquer status, inclusive as que falharam ou ficaram paradas. O filtro por conta funciona como um extrato: o valor das concluídas aparece com `-` quando saiu da conta e com `+` quando entrou;
+- a fila (`processamentos`), avisando quando o worker já pode retomar um processamento parado;
+- as falhas (`falhas_processamento`), com a exceção guardada.
+
+O painel só lê e não se atualiza sozinho: depois de uma requisição, é só clicar em **Atualizar**. Como não há regra de negócio, o `PainelController` fala direto com o `PainelRepository`, sem service. Ele também fica de fora do log de requisições, para não misturar as visualizações com as chamadas da API, e não faz parte da especificação do Swagger.
+
 ## Testes
 
 ```bash
@@ -135,7 +147,7 @@ As tabelas, colunas e relacionamentos estão documentados em [`docs/migrations`]
 - **PDO puro, sem ORM.** São poucas consultas, e o SQL à vista deixa claro o que acontece com o dinheiro.
 - **Centavos em `INTEGER`.** Dinheiro em ponto flutuante perde precisão; inteiro de centavos não.
 - **Erros como exceções.** Cada regra quebrada lança uma exceção com o status HTTP (`DadosInvalidosException` 400, `ContaNaoEncontradaException` 404, `SaldoInsuficienteException` 409), e um único `ErroHandler` transforma tudo em `{"erro": "..."}`. Erro inesperado vira 500 com mensagem genérica, e o detalhe vai para o log.
-- **Log de requisições.** O `LogRequisicaoMiddleware` (Monolog, PSR-3) grava em `var/logs/requisicoes.log` a rota, o IP, o corpo da requisição, o status e a resposta de cada chamada:
+- **Log de requisições.** O `LogRequisicaoMiddleware` (Monolog, PSR-3) grava em `var/logs/requisicoes.log` a rota, o IP, o corpo da requisição, o status e a resposta de cada chamada da API (o painel fica de fora):
 
   ```
   [2026-10-31T18:52:13.637179+00:00] requisicoes.INFO: POST /transferencias {"ip":"192.168.65.1","requisicao":{"origem":1,"destino":2,"valorCentavos":3000},"status":201,"resposta":{"id":1,"origem":1,"destino":2,"valorCentavos":3000,"status":"CONCLUIDA"}} []
@@ -373,7 +385,7 @@ A API da questão 1 já traz essas duas proteções prontas para ligar: veja [Id
 ## Referências e ferramentas
 
 - **Linguagem e framework:** PHP 8.4 e Slim 4 (`slim/slim` e `slim/psr7`).
-- **Bibliotecas:** PHP-DI (container com autowiring), Monolog (log de requisições), ramsey/uuid (identificador de cada processamento) e Pest (testes).
+- **Bibliotecas:** PHP-DI (container com autowiring), Monolog (log de requisições), ramsey/uuid (identificador de cada processamento), Twig com `slim/twig-view` (página do painel) e Pest (testes).
 - **Banco:** SQLite, acessado com PDO.
 - **Ambiente:** Docker (imagem `php:8.4-cli-alpine`), Docker Compose e Composer.
 - **Documentação da API:** especificação OpenAPI escrita à mão e Swagger UI, carregado do unpkg.
@@ -397,7 +409,7 @@ A API da questão 1 já traz essas duas proteções prontas para ligar: veja [Id
 │   ├── index.php              entrada da API
 │   └── swagger/               página e especificação OpenAPI
 ├── src/
-│   ├── Controller/            recebem a requisição e devolvem JSON
+│   ├── Controller/            recebem a requisição e devolvem JSON (ou o HTML do painel)
 │   ├── Database/              conexão e criação do banco
 │   ├── Enum/                  status da transferência
 │   ├── Exceptions/            erros de negócio com o status HTTP
@@ -408,6 +420,7 @@ A API da questão 1 já traz essas duas proteções prontas para ligar: veja [Id
 │   ├── Repository/            acesso ao banco (PDO)
 │   ├── Service/               regras de negócio
 │   └── Validation/            validação da entrada
+├── templates/                 página do painel de demonstração (Twig)
 ├── tests/
 │   ├── Feature/               testes Pest da API
 │   └── Questao2/              testes da questão 2
